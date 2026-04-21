@@ -102,6 +102,9 @@ document.addEventListener("DOMContentLoaded", function () {
     // All threshold checks and display use penLifts directly — no more -1 offset confusion.
     var penLifts = -1;
 
+    // Ordered list of points drawn — used by POST /angle to compute average drawing angle.
+    var strokePoints = [];
+
     var drawingEnabled = true;
 
     // -------------------------------------------------------------------------
@@ -119,6 +122,7 @@ document.addEventListener("DOMContentLoaded", function () {
         ctx.clearRect(0, 0, drawingPad.width, drawingPad.height);
         totalLength = 0;
         penLifts = -1;
+        strokePoints = [];
         drawingEnabled = true;
         document.getElementById("predictionLabel").textContent = "Results: ";
     });
@@ -135,20 +139,48 @@ document.addEventListener("DOMContentLoaded", function () {
         drawingEnabled = false;
 
         var drawingData = getDrawingData();
+        var saveDrawing = document.getElementById("uploadCheckbox").checked;
 
-        // TODO (Phase 3): replace this fetch with GET /reference from the FastAPI backend.
+        document.getElementById("predictionLabel").textContent = "Analysing...";
+
         fetchReference()
             .then(function (refData) {
                 var matchPercentage = calculateMatchPercentage(drawingData, refData.points);
                 var lengthPercentageDiff = ((totalLength - refData.length) / refData.length) * 100;
 
-                displayResults(totalLength, lengthPercentageDiff, matchPercentage, penLifts);
+                return postJSON("http://localhost:8000/angle", { points: strokePoints })
+                    .then(function (angleData) {
+                        var avgAngle = angleData.avg_angle;
 
-                // TODO (Phase 3): POST features to /predict for ML result.
-                // TODO (Phase 3): POST drawing to /submit if checkbox is checked.
+                        return postJSON("http://localhost:8000/predict", {
+                            line_length: totalLength,
+                            length_pct_diff: lengthPercentageDiff,
+                            match_pct: matchPercentage,
+                            pen_lifts: penLifts,
+                            avg_angle: avgAngle
+                        }).then(function (result) {
+                            displayResults(
+                                totalLength, lengthPercentageDiff, matchPercentage,
+                                penLifts, avgAngle, result.prediction, result.confidence
+                            );
+
+                            return postJSON("http://localhost:8000/submit", {
+                                features: {
+                                    line_length: totalLength,
+                                    length_pct_diff: lengthPercentageDiff,
+                                    match_pct: matchPercentage,
+                                    pen_lifts: penLifts,
+                                    avg_angle: avgAngle
+                                },
+                                prediction: result.prediction,
+                                save_drawing: saveDrawing,
+                                drawing_data: saveDrawing ? drawingData : []
+                            });
+                        });
+                    });
             })
             .catch(function (err) {
-                console.error("Could not fetch reference drawing:", err);
+                console.error("Backend error:", err);
                 document.getElementById("predictionLabel").textContent =
                     "Error: backend not available. Start the FastAPI server and try again.";
             });
@@ -177,6 +209,8 @@ document.addEventListener("DOMContentLoaded", function () {
         ctx.lineTo(e.offsetX, e.offsetY);
         ctx.stroke();
 
+        strokePoints.push([e.offsetX, e.offsetY]);
+
         var dx = e.offsetX - lastX;
         var dy = e.offsetY - lastY;
         totalLength += Math.sqrt(dx * dx + dy * dy);
@@ -190,11 +224,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // -------------------------------------------------------------------------
-    // BUG FIX 2 & 3: display and threshold logic both use penLifts directly.
-    // BUG FIX 3: the length condition is now the correct exclusive check
-    //            (outside ±5%) instead of the always-true original.
+    // Display all 5 features and the ML model's prediction + confidence.
+    // The hardcoded threshold logic from the original has been replaced by
+    // the GaussianNB result returned from POST /predict.
     // -------------------------------------------------------------------------
-    function displayResults(totalLength, lengthPercentageDiff, matchPercentage, penLifts) {
+    function displayResults(totalLength, lengthPercentageDiff, matchPercentage, penLifts, avgAngle, prediction, confidence) {
         var predictionLabel = document.getElementById("predictionLabel");
 
         if (penLifts > 15) {
@@ -207,30 +241,28 @@ document.addEventListener("DOMContentLoaded", function () {
             "Length of line drawing: " + totalLength.toFixed(2) + " pixels<br><br>" +
             "Percentage Difference from Reference Length: " + lengthPercentageDiff.toFixed(2) + "%<br><br>" +
             "Percentage Similarity to Reference Drawing: " + matchPercentage.toFixed(2) + "%<br><br>" +
-            "Number of Times Pen was Lifted: " + penLifts + "<br><br>";
+            "Number of Times Pen was Lifted: " + penLifts + "<br><br>" +
+            "Average Angle: " + avgAngle.toFixed(4) + "°<br><br>";
 
-        if (matchPercentage >= 40 && lengthPercentageDiff <= 5 && lengthPercentageDiff >= -5 && penLifts <= 3) {
-            predictionLabel.innerHTML = statsHTML + "Prediction of Parkinson's Disease: PD NOT LIKELY";
-        } else {
-            var reasons = [];
+        var confidencePct = (confidence * 100).toFixed(1);
+        predictionLabel.innerHTML =
+            statsHTML +
+            "Prediction of Parkinson's Disease: PD " + prediction + "<br><br>" +
+            "Model confidence: " + confidencePct + "%";
+    }
 
-            if (matchPercentage < 40) {
-                reasons.push("Match percentage is lower than 40.");
-            }
-            // BUG FIX 3: was `<= 5 || >= -5` (always true). Now correctly flags
-            // only when the difference is OUTSIDE the acceptable ±5% band.
-            if (lengthPercentageDiff > 5 || lengthPercentageDiff < -5) {
-                reasons.push("Length percentage difference is significant.");
-            }
-            if (penLifts > 3) {
-                reasons.push("No. of times pen was lifted is higher than 3.");
-            }
-
-            predictionLabel.innerHTML = statsHTML + "Prediction of Parkinson's Disease: PD LIKELY";
-            if (reasons.length > 0) {
-                predictionLabel.innerHTML += "<br><br>Reason: " + reasons.join("<br>");
-            }
-        }
+    // -------------------------------------------------------------------------
+    // Shared JSON POST helper.
+    // -------------------------------------------------------------------------
+    function postJSON(url, body) {
+        return fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        }).then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        });
     }
 
     // -------------------------------------------------------------------------
