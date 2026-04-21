@@ -115,6 +115,12 @@ document.addEventListener("DOMContentLoaded", function () {
     drawingPad.addEventListener("mouseup", endDrawing);
     drawingPad.addEventListener("mouseout", endDrawing);
 
+    // Touch support — passive: false so we can call preventDefault() and stop
+    // the page scrolling while the user is drawing on the canvas.
+    drawingPad.addEventListener("touchstart", startDrawingTouch, { passive: false });
+    drawingPad.addEventListener("touchmove", drawTouch, { passive: false });
+    drawingPad.addEventListener("touchend", endDrawing);
+
     // -------------------------------------------------------------------------
     // Clear button
     // -------------------------------------------------------------------------
@@ -185,6 +191,29 @@ document.addEventListener("DOMContentLoaded", function () {
                     "Error: backend not available. Start the FastAPI server and try again.";
             });
     });
+
+    // -------------------------------------------------------------------------
+    // Touch helpers — convert a TouchEvent into the same {offsetX, offsetY}
+    // shape that the mouse handlers expect, then delegate to them.
+    // -------------------------------------------------------------------------
+    function getTouchPos(e) {
+        var rect = drawingPad.getBoundingClientRect();
+        var touch = e.touches[0];
+        return {
+            offsetX: touch.clientX - rect.left,
+            offsetY: touch.clientY - rect.top
+        };
+    }
+
+    function startDrawingTouch(e) {
+        e.preventDefault();
+        startDrawing(getTouchPos(e));
+    }
+
+    function drawTouch(e) {
+        e.preventDefault();
+        draw(getTouchPos(e));
+    }
 
     // -------------------------------------------------------------------------
     // BUG FIX 1: pen lift tracking via mousedown, not click events.
