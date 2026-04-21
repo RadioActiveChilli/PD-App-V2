@@ -45,7 +45,7 @@ def _path_length(points: list) -> float:
     return total
 
 
-REFERENCE_POINTS = _generate_spiral()
+REFERENCE_POINTS = _generate_spiral(canvas_size=400)
 REFERENCE_LENGTH = _path_length(REFERENCE_POINTS)
 
 # ── ML model ──────────────────────────────────────────────────────────────────
