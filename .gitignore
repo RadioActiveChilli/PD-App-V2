@@ -9,3 +9,17 @@ mazi.zip
 
 # Scratch/temp files
 saver.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pkl
+venv/
+.env
+
+# Data outputs
+backend/model/
+
+# Project planning docs (not public)
+projectPlan.md
+projectTimeline.md

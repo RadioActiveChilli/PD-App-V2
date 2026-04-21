@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parkinson's Disease Detection App</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f0f0f0;
+        }
+        #drawingPadContainer {
+            position: relative;
+            width: 200px;
+            height: 200px;
+        }
+        #drawingPad {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            border: 1px solid black;
+            cursor: crosshair;
+        }
+        #backgroundImage {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.25;
+        }
+        #clearDrawing {
+            margin-right: 10px;
+        }
+        #submitAttempt {
+            margin: 10px;
+            background-color: #aaf0aa;
+        }
+        h1, #predictionLabel {
+            margin: 10px;
+        }
+        #predictionLabel {
+            border: 1pt solid black;
+            padding: 5px;
+            width: 400px;
+            min-height: 200px;
+            display: inline-block;
+            vertical-align: top;
+        }
+        #note {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+
+<div>
+    <h1>Parkinson's Disease Detection App</h1>
+    <p id="note">Note: This Parkinson's Disease prediction application is for testing purposes only and is not meant to be used in lieu of a clinical diagnosis of Parkinson's Disease. For more information, please refer to the following resources:</p>
+    <ul>
+        <li><a href="https://www.nhs.uk/conditions/parkinsons-disease/">NHS - Parkinson's Disease</a>: Comprehensive information on Parkinson's Disease, including symptoms, causes, diagnosis, and treatment options provided by the UK's National Health Service.</li>
+        <li><a href="https://www.movementdisorders.org/">International Parkinson and Movement Disorder Society</a>: An organization dedicated to improving patient care through education and research in movement disorders, including Parkinson's Disease.</li>
+        <li><a href="https://www.who.int/news-room/fact-sheets/detail/parkinson-disease">WHO - Parkinson Disease Fact Sheet</a>: An informative fact sheet from the World Health Organization, offering global perspectives on Parkinson's Disease, including prevalence, risk factors, and management.</li>
+        <li><a href="https://www.parkinson.org/living-with-parkinsons/finding-care/global-care-network">Parkinson's Foundation - Global Care Network</a>: Resources for finding specialized care for Parkinson's Disease through the Parkinson's Foundation's Global Care Network, including care centers and expert care providers.</li>
+    </ul>
+
+    <input type="checkbox" id="uploadCheckbox" checked>
+    <label for="uploadCheckbox">Save drawing for research?</label>
+
+    <div id="drawingPadContainer">
+        <img id="backgroundImage" src="assets/BGspiral.png" alt="Spiral Image">
+        <canvas id="drawingPad" width="200" height="200"></canvas>
+    </div>
+
+    <br>
+    <button id="clearDrawing">Clear Drawing</button>
+    <button id="submitAttempt">Submit Attempt</button>
+
+    <label id="predictionLabel">Results: </label>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var drawingPad = document.getElementById("drawingPad");
+    var ctx = drawingPad.getContext("2d");
+
+    var isDrawing = false;
+    var lastX = 0;
+    var lastY = 0;
+
+    // BUG FIX 5: totalLength is only ever reset in the clear handler, never in startDrawing.
+    var totalLength = 0;
+
+    // BUG FIX 1 & 2: penLifts starts at -1 so the very first mousedown (starting the
+    // drawing) brings it to 0. Every subsequent mousedown is a genuine pen lift.
+    // All threshold checks and display use penLifts directly — no more -1 offset confusion.
+    var penLifts = -1;
+
+    var drawingEnabled = true;
+
+    // -------------------------------------------------------------------------
+    // Drawing event listeners
+    // -------------------------------------------------------------------------
+    drawingPad.addEventListener("mousedown", startDrawing);
+    drawingPad.addEventListener("mousemove", draw);
+    drawingPad.addEventListener("mouseup", endDrawing);
+    drawingPad.addEventListener("mouseout", endDrawing);
+
+    // -------------------------------------------------------------------------
+    // Clear button
+    // -------------------------------------------------------------------------
+    document.getElementById("clearDrawing").addEventListener("click", function () {
+        ctx.clearRect(0, 0, drawingPad.width, drawingPad.height);
+        totalLength = 0;
+        penLifts = -1;
+        drawingEnabled = true;
+        document.getElementById("predictionLabel").textContent = "Results: ";
+    });
+
+    // -------------------------------------------------------------------------
+    // Submit button
+    // -------------------------------------------------------------------------
+    document.getElementById("submitAttempt").addEventListener("click", function () {
+        if (totalLength === 0) {
+            alert("Please make a drawing before submitting.");
+            return;
+        }
+
+        drawingEnabled = false;
+
+        var drawingData = getDrawingData();
+
+        // TODO (Phase 3): replace this fetch with GET /reference from the FastAPI backend.
+        fetchReference()
+            .then(function (refData) {
+                var matchPercentage = calculateMatchPercentage(drawingData, refData.points);
+                var lengthPercentageDiff = ((totalLength - refData.length) / refData.length) * 100;
+
+                displayResults(totalLength, lengthPercentageDiff, matchPercentage, penLifts);
+
+                // TODO (Phase 3): POST features to /predict for ML result.
+                // TODO (Phase 3): POST drawing to /submit if checkbox is checked.
+            })
+            .catch(function (err) {
+                console.error("Could not fetch reference drawing:", err);
+                document.getElementById("predictionLabel").textContent =
+                    "Error: backend not available. Start the FastAPI server and try again.";
+            });
+    });
+
+    // -------------------------------------------------------------------------
+    // BUG FIX 1: pen lift tracking via mousedown, not click events.
+    // Every mousedown increments penLifts. Starting at -1 means the first
+    // mousedown (pen-down to begin drawing) results in penLifts === 0.
+    // -------------------------------------------------------------------------
+    function startDrawing(e) {
+        if (!drawingEnabled) return;
+        penLifts++;
+        isDrawing = true;
+        [lastX, lastY] = [e.offsetX, e.offsetY];
+        // BUG FIX 5: do NOT reset totalLength here.
+    }
+
+    function draw(e) {
+        if (!isDrawing || !drawingEnabled) return;
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+
+        var dx = e.offsetX - lastX;
+        var dy = e.offsetY - lastY;
+        totalLength += Math.sqrt(dx * dx + dy * dy);
+
+        lastX = e.offsetX;
+        lastY = e.offsetY;
+    }
+
+    function endDrawing() {
+        isDrawing = false;
+    }
+
+    // -------------------------------------------------------------------------
+    // BUG FIX 2 & 3: display and threshold logic both use penLifts directly.
+    // BUG FIX 3: the length condition is now the correct exclusive check
+    //            (outside ±5%) instead of the always-true original.
+    // -------------------------------------------------------------------------
+    function displayResults(totalLength, lengthPercentageDiff, matchPercentage, penLifts) {
+        var predictionLabel = document.getElementById("predictionLabel");
+
+        if (penLifts > 15) {
+            predictionLabel.innerHTML =
+                "Prediction of Parkinson's Disease: Too Many Pen Lifts, Please Try Again";
+            return;
+        }
+
+        var statsHTML =
+            "Length of line drawing: " + totalLength.toFixed(2) + " pixels<br><br>" +
+            "Percentage Difference from Reference Length: " + lengthPercentageDiff.toFixed(2) + "%<br><br>" +
+            "Percentage Similarity to Reference Drawing: " + matchPercentage.toFixed(2) + "%<br><br>" +
+            "Number of Times Pen was Lifted: " + penLifts + "<br><br>";
+
+        if (matchPercentage >= 40 && lengthPercentageDiff <= 5 && lengthPercentageDiff >= -5 && penLifts <= 3) {
+            predictionLabel.innerHTML = statsHTML + "Prediction of Parkinson's Disease: PD NOT LIKELY";
+        } else {
+            var reasons = [];
+
+            if (matchPercentage < 40) {
+                reasons.push("Match percentage is lower than 40.");
+            }
+            // BUG FIX 3: was `<= 5 || >= -5` (always true). Now correctly flags
+            // only when the difference is OUTSIDE the acceptable ±5% band.
+            if (lengthPercentageDiff > 5 || lengthPercentageDiff < -5) {
+                reasons.push("Length percentage difference is significant.");
+            }
+            if (penLifts > 3) {
+                reasons.push("No. of times pen was lifted is higher than 3.");
+            }
+
+            predictionLabel.innerHTML = statsHTML + "Prediction of Parkinson's Disease: PD LIKELY";
+            if (reasons.length > 0) {
+                predictionLabel.innerHTML += "<br><br>Reason: " + reasons.join("<br>");
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // BUG FIX 4: O(n) match using a Set instead of O(n²) nested loop.
+    // -------------------------------------------------------------------------
+    function calculateMatchPercentage(userDrawing, referenceDrawing) {
+        var refSet = new Set(referenceDrawing.map(function (p) { return p[0] + "," + p[1]; }));
+        var matchCount = 0;
+        var total = Math.min(userDrawing.length, referenceDrawing.length);
+        for (var i = 0; i < total; i++) {
+            if (refSet.has(userDrawing[i][0] + "," + userDrawing[i][1])) {
+                matchCount++;
+            }
+        }
+        return total === 0 ? 0 : (matchCount / total) * 100;
+    }
+
+    // Returns an array of [x, y] for every black pixel on the canvas.
+    function getDrawingData() {
+        var imageData = ctx.getImageData(0, 0, drawingPad.width, drawingPad.height).data;
+        var drawingData = [];
+        var w = drawingPad.width;
+        var h = drawingPad.height;
+        for (var y = 0; y < h; y++) {
+            for (var x = 0; x < w; x++) {
+                var idx = (y * w + x) * 4;
+                if (imageData[idx] === 0 && imageData[idx + 1] === 0 &&
+                    imageData[idx + 2] === 0 && imageData[idx + 3] > 0) {
+                    drawingData.push([x, y]);
+                }
+            }
+        }
+        return drawingData;
+    }
+
+    // Placeholder — replaced by GET /reference in Phase 3.
+    function fetchReference() {
+        return fetch("http://localhost:8000/reference")
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            });
+    }
+});
+</script>
+
+</body>
+</html>
