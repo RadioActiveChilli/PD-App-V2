@@ -31,8 +31,10 @@ def train():
     X = df[FEATURE_COLS]
     y = df[TARGET_COL]
 
+    # stratify=y ensures both classes are proportionally represented in train
+    # and test — critical with small datasets to avoid a biased split.
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
 
     clf = GaussianNB()
