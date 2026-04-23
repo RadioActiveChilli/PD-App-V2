@@ -19,6 +19,7 @@ venv/
 
 # Data outputs
 backend/model/
+backend/data/submissions.json
 
 # Project planning docs (not public)
 projectPlan.md

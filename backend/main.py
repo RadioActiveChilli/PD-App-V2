@@ -1,5 +1,6 @@
 import json
 import math
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -9,15 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ml2 import average_angle_between_groups
-
-app = FastAPI(title="PD Detection API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ── Reference spiral ──────────────────────────────────────────────────────────
 
@@ -54,8 +46,8 @@ MODEL_PATH = Path(__file__).parent / "model" / "pd_model.pkl"
 _model = None
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global _model
     if MODEL_PATH.exists():
         _model = joblib.load(MODEL_PATH)
@@ -64,6 +56,17 @@ async def startup():
             "WARNING: model file not found. "
             "Run `python backend/train_model.py` then restart the server."
         )
+    yield
+
+
+app = FastAPI(title="PD Detection API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ── Request / response schemas ────────────────────────────────────────────────
