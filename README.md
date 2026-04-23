@@ -44,7 +44,6 @@ PD App V2/
     ├── main.py             # FastAPI app (GET /reference, POST /predict, POST /angle, POST /submit)
     ├── train_model.py      # Trains GaussianNB and saves model to backend/model/
     ├── ml2.py              # Average drawing angle calculation utility
-    ├── mlupdater.py        # Original training script (kept for reference)
     ├── requirements.txt    # Python dependencies
     └── data/
         ├── predictiontable.xlsx   # Labelled training dataset
